@@ -1,7 +1,10 @@
 #include "server.h"
 
+bool interruptCalled = false;
+
 int main() {
 
+    signal(SIGINT, sigintHandler);
     // Socket is a connection to a port at a certain ip address that can send and receive data
     // a door to a house that acts like other unix file descriptors
     // First must create the socket file descriptor. probably 3 as 0 is stdin, 1 stdout, 2 stderr
@@ -53,7 +56,7 @@ int main() {
         fatalError("Failed to listen to socket. Error code: %i\n", listenRes);
     }
 
-    while (true) {
+    while (!interruptCalled) {
         // accept a connection from the queue and assign it to a new socket
         // blocks until connection present in queue
         // first param is fd of connection socket
@@ -80,13 +83,24 @@ int main() {
 
         printf("\n========Connection Details=========\n");
         printf("%s\n", readBuff);
-        printf("=========End Details========\n");
-        char* message = "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 12\n\nHello world!";
-        printf("Sending message: \"%s\"...\n", message);
-        write(newSocket, message, strlen(message));
+        printf("=========End Details=========\n");
+
+        char* response = createResponse();
+        if (response == NULL) {
+            response = "HTTP/1.1 500 SERVER ERROR\n\n";
+        }
+        printf("\n========Sending Response=========\n");
+        puts(response);
+        printf("========End Response=========\n");
+        // can write many times by setting content length to greater than the number of bytes you are sending at once.
+        // Client will wait until all bytes have been received before displaying
+        write(newSocket, response, strlen(response));
+        free(response);
         close(newSocket);
-        printf("Closed socket\n\n");
+        printf("Closed client socket\n\n");
     }
+    close(serverSocketFD);
+    puts("=======Server Finished======");
 }
 
 void fatalError(char* formatStr, ...) {
@@ -95,4 +109,47 @@ void fatalError(char* formatStr, ...) {
     va_start(args, formatStr);
     vfprintf(stderr, formatStr, args);
     exit(1);
+}
+
+char* createResponse() {
+    char* bodyText = loadFileText("test.json");
+    //TODO construct 'Content-Length:' properly
+    //TODO test sending an image. optimum block load size is 2^12 (4096)
+    char* header = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n";
+    char* response = malloc(strlen(bodyText) + strlen(header) + 1);
+    if (bodyText == NULL || response == NULL) {
+        return NULL;
+    }
+    response[0] = '\0';
+    strcat(response, header);
+    strcat(response, bodyText);
+    free(bodyText);
+    return response;
+}
+
+char* loadFileText(char* fileName) {
+
+    FILE* file = fopen(fileName, "r");
+    long byteSize = getFileSize(file);
+    char* buff = malloc(byteSize + 1);
+    if (buff == NULL) {
+        return NULL;
+    }
+    // add in terminator
+    buff[byteSize] = '\0';
+    fread(buff, sizeof(char), byteSize, file);
+    fclose(file);
+    return buff;
+}
+
+long getFileSize(FILE* file) {
+    fseek(file, 0, SEEK_END);
+    long byteSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    return byteSize;
+}
+
+void sigintHandler(int num) {
+    puts("Interrupt received");
+    interruptCalled = true;
 }
