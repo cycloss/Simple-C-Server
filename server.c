@@ -1,6 +1,9 @@
 #include "server.h"
+#include "response.h"
 
-bool interruptCalled = false;
+// TODO study this: http://www.cs.cmu.edu/afs/cs/academic/class/15213-s00/www/class28/tiny.c
+
+int serverSocketFD;
 
 int main() {
 
@@ -11,7 +14,7 @@ int main() {
     // Address family INET (TCP). AF_UNIX is like a pipe
     // SOCK_DGRAM for udp
 
-    int serverSocketFD = socket(AF_INET, SOCK_STREAM, 0);
+    serverSocketFD = socket(AF_INET, SOCK_STREAM, 0);
 
     if (serverSocketFD < 0) {
         fatalError("Failed to create socket file descriptor. Error: %i\n", serverSocketFD);
@@ -39,7 +42,7 @@ int main() {
     // let OS choose with 0.0.0.0 which is INADDR_ANY
     sockAddr->sin_addr.s_addr = htonl(INADDR_ANY);
 
-    //bind (assign) sin_addr.s_addr to socket
+    // bind (assign) sin_addr.s_addr to socket
     // must cast to sockadd*
     int bindRes = bind(serverSocketFD, (struct sockaddr*)sockAddr, sizeof(*sockAddr));
 
@@ -56,7 +59,7 @@ int main() {
         fatalError("Failed to listen to socket. Error code: %i\n", listenRes);
     }
 
-    while (!interruptCalled) {
+    while (true) {
         // accept a connection from the queue and assign it to a new socket
         // blocks until connection present in queue
         // first param is fd of connection socket
@@ -75,6 +78,7 @@ int main() {
         char readBuff[1024];
         // read bytes send by incoming connection
         // use read because of fread because read reads from an integer file descriptor, where as fread reads from a FILE*
+        // TODO dynamically resize readBuff
         int bytesRead = read(newSocket, readBuff, sizeof(readBuff));
 
         if (bytesRead == 0) {
@@ -84,72 +88,30 @@ int main() {
         printf("\n========Connection Details=========\n");
         printf("%s\n", readBuff);
         printf("=========End Details=========\n");
-
-        char* response = createResponse();
-        if (response == NULL) {
-            response = "HTTP/1.1 500 SERVER ERROR\n\n";
-        }
+        char* response = createResponse("page.html");
         printf("\n========Sending Response=========\n");
-        puts(response);
-        printf("========End Response=========\n");
+
+        if (response == NULL) {
+            char* resp = "HTTP/1.1 500 SERVER ERROR\r\nContent-Length: 0\r\n\r\n";
+            write(newSocket, resp, strlen(resp));
+        } else {
+            puts(response);
+            printf("========End Response=========\n");
+            write(newSocket, response, strlen(response));
+            free(response);
+        }
+
         // can write many times by setting content length to greater than the number of bytes you are sending at once.
         // Client will wait until all bytes have been received before displaying
-        write(newSocket, response, strlen(response));
-        free(response);
+
         close(newSocket);
         printf("Closed client socket\n\n");
     }
-    close(serverSocketFD);
-    puts("=======Server Finished======");
-}
-
-void fatalError(char* formatStr, ...) {
-    fprintf(stderr, "Fatal Error: ");
-    va_list args;
-    va_start(args, formatStr);
-    vfprintf(stderr, formatStr, args);
-    exit(1);
-}
-
-char* createResponse() {
-    char* bodyText = loadFileText("test.json");
-    //TODO construct 'Content-Length:' properly
-    //TODO test sending an image. optimum block load size is 2^12 (4096)
-    char* header = "HTTP/1.1 200 OK\nContent-Type: application/json\n\n";
-    char* response = malloc(strlen(bodyText) + strlen(header) + 1);
-    if (bodyText == NULL || response == NULL) {
-        return NULL;
-    }
-    response[0] = '\0';
-    strcat(response, header);
-    strcat(response, bodyText);
-    free(bodyText);
-    return response;
-}
-
-char* loadFileText(char* fileName) {
-
-    FILE* file = fopen(fileName, "r");
-    long byteSize = getFileSize(file);
-    char* buff = malloc(byteSize + 1);
-    if (buff == NULL) {
-        return NULL;
-    }
-    // add in terminator
-    buff[byteSize] = '\0';
-    fread(buff, sizeof(char), byteSize, file);
-    fclose(file);
-    return buff;
-}
-
-long getFileSize(FILE* file) {
-    fseek(file, 0, SEEK_END);
-    long byteSize = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    return byteSize;
+    return 0;
 }
 
 void sigintHandler(int num) {
-    puts("Interrupt received");
-    interruptCalled = true;
+    close(serverSocketFD);
+    puts("=======Server Finished======");
+    exit(0);
 }

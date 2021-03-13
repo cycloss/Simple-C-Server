@@ -9,8 +9,4 @@
 #include <stdbool.h>
 #include <unistd.h>
 
-void fatalError(char* formatString, ...);
-char* loadFileText(char* fileName);
-long getFileSize(FILE* file);
-char* createResponse();
 void sigintHandler(int num);
